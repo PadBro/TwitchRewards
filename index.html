@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<!--
+Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance with the License. A copy of the License is located at
+http://aws.amazon.com/apache2.0/
+or in the "license" file accompanying this file. This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css">
+    <title>Twitch PubSub Example</title>
+  </head>
+  <body>
+    <h2 class="text-center">Twitch PubSub Example</h2>
+    <div class="container">
+      <div class="row">
+        <div style="display:none" class="auth" class="text-center">
+          <p>First, connect with your Twitch Account:</p>
+          <a id="auth-link">click here</a>
+        </div>
+        <div style="display:none" class="socket">
+          <textarea class="ws-output" rows="20" style="font-family:Courier;width:100%"></textarea>
+          <form id="topic-form" class="text-right form-inline" >
+            <label id="topic-label" for="topic-text"></label>
+            <input type="text" id="topic-text" placeholder="Topic">
+            <button type="submit" class="btn">Listen</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+    <script>
+      const clientId = '9yr72u8in0lcq9r7kpgfmyef5alg4q';
+      const redirectURI = 'http://localhost:8080';
+      const scope = 'channel%3Aread%3Aredemptions';
+      let ws;
+
+      function parseFragment(hash) {
+        const hashMatch = function(expr) {
+          const match = hash.match(expr);
+          return match ? match[1] : null;
+        };
+        const state = hashMatch(/state=(\w+)/);
+        if (sessionStorage.twitchOAuthState == state){
+          sessionStorage.twitchOAuthToken = hashMatch(/access_token=(\w+)/);
+        }
+        return
+      };
+
+      function authUrl() {
+        sessionStorage.twitchOAuthState = nonce(15);
+        const url = 'https://id.twitch.tv/oauth2/authorize' +
+          '?response_type=token' +
+          '&client_id=' + clientId + 
+          '&redirect_uri=' + redirectURI +
+          '&state=' + sessionStorage.twitchOAuthState +
+          '&scope=' + scope;
+        return url
+      }
+
+      // Source: https://www.thepolyglotdeveloper.com/2015/03/create-a-random-nonce-string-using-javascript/
+      function nonce(length) {
+        let text = "";
+        const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        for (let i = 0; i < length; i++) {
+          text += possible.charAt(Math.floor(Math.random() * possible.length));
+        }
+        return text;
+      }
+
+      function heartbeat() {
+        message = {
+         type: 'PING'
+        };
+        $('.ws-output').append('SENT: ' + JSON.stringify(message) + '\n');
+        ws.send(JSON.stringify(message));
+      }
+
+      function listen(topic) {
+        message = {
+          type: 'LISTEN',
+          nonce: nonce(15),
+          data: {
+            topics: [topic],
+            auth_token: sessionStorage.twitchOAuthToken
+          }
+        };
+        $('.ws-output').append('SENT: ' + JSON.stringify(message) + '\n');
+        ws.send(JSON.stringify(message));
+      }
+
+      function connect() {
+        const heartbeatInterval = 1000 * 60; //ms between PING's
+        const reconnectInterval = 1000 * 3; //ms to wait before reconnect
+        let heartbeatHandle;
+
+        ws = new WebSocket('wss://pubsub-edge.twitch.tv');
+
+        ws.onopen = function(event) {
+          $('.ws-output').append('INFO: Socket Opened\n');
+          heartbeat();
+          heartbeatHandle = setInterval(heartbeat, heartbeatInterval);
+        };
+
+        ws.onerror = function(error) {
+          $('.ws-output').append('ERR:  ' + JSON.stringify(error) + '\n');
+        };
+
+        ws.onmessage = function(event) {
+          const message = JSON.parse(event.data);
+          validateEvent(message)
+          $('.ws-output').append('RECV: ' + JSON.stringify(message) + '\n');
+          if (message.type == 'RECONNECT') {
+            $('.ws-output').append('INFO: Reconnecting...\n');
+            setTimeout(connect, reconnectInterval);
+          }
+        };
+
+        ws.onclose = function() {
+          $('.ws-output').append('INFO: Socket Closed\n');
+          clearInterval(heartbeatHandle);
+          $('.ws-output').append('INFO: Reconnecting...\n');
+          setTimeout(connect, reconnectInterval);
+        };
+      }
+
+      function validateEvent(event) {
+        if (!event || !event.data) {
+          return;
+        }
+        const message = JSON.parse(event.data.message)
+        if (message.type != "reward-redeemed") {
+          return
+        }
+        // send request to localhost to execute command
+        $.ajax({
+          url: `http://localhost:8080/commands`,
+          method: "post",
+          data: {
+            command: message.data.redemption.reward.title
+          }
+        })
+        .done(function(data) {
+          console.log(data)
+        });
+      }
+
+      $(function() {
+        if (document.location.hash.match(/access_token=(\w+)/)) {
+          parseFragment(document.location.hash);
+        }
+        if (sessionStorage.twitchOAuthToken) {
+          connect();
+          $('.socket').show()
+          $.ajax({
+            url: "https://api.twitch.tv/helix/users?login=PadBro",
+            method: "GET",
+            headers: {
+              "Client-ID": clientId,
+              "Authorization": "Bearer " + sessionStorage.twitchOAuthToken
+            }
+          })
+          .done(function(users) {
+            console.log(users.data[0].id)
+            $('#topic-label').text(`Enter a topic to listen to. For example, to listen to whispers enter topic 'whispers.${users.data[0].id}'`);
+          });
+        } else {
+          const url = authUrl()
+          $('#auth-link').attr("href", url);
+          $('.auth').show()
+        }
+      });
+
+      $('#topic-form').submit(function() {
+        listen($('#topic-text').val());
+        event.preventDefault();
+      });
+    </script>
+  </body>
+</html>
