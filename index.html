@@ -37,6 +37,8 @@ or in the "license" file accompanying this file. This file is distributed on an 
       const redirectURI = 'http://localhost:8080';
       const scope = 'channel%3Aread%3Aredemptions';
       let ws;
+      let user_id;
+      let connected = false;
 
       function parseFragment(hash) {
         const hashMatch = function(expr) {
@@ -103,6 +105,10 @@ or in the "license" file accompanying this file. This file is distributed on an 
           $('.ws-output').append('INFO: Socket Opened\n');
           heartbeat();
           heartbeatHandle = setInterval(heartbeat, heartbeatInterval);
+          if (user_id) {
+            listen(`channel-points-channel-v1.${user_id}`)
+          }
+
         };
 
         ws.onerror = function(error) {
@@ -164,7 +170,10 @@ or in the "license" file accompanying this file. This file is distributed on an 
             }
           })
           .done(function(users) {
-            console.log(users.data[0].id)
+            user_id = users.data[0].id
+            if (connected) {
+              listen(`channel-points-channel-v1.${user_id}`)
+            }
             $('#topic-label').text(`Enter a topic to listen to. For example, to listen to whispers enter topic 'whispers.${users.data[0].id}'`);
           });
         } else {
