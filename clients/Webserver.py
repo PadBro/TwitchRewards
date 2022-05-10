@@ -33,9 +33,8 @@ class MyServer(BaseHTTPRequestHandler):
     self.send_response(200)
     self.end_headers()
     postvars = self.parse_POST()
-    print(postvars)
     command = postvars.get(b'command', None)
-    if commands[command[0].decode("utf8")]:
+    if command and command[0].decode("utf8") in commands:
       commands[command[0].decode("utf8")]()
       pass
 
