@@ -29,16 +29,25 @@ or in the "license" file accompanying this file. This file is distributed on an 
             <button type="submit" class="btn">Listen</button>
           </form>
         </div>
+        <div class="rewards">
+          XXXXXXXX
+        </div>
       </div>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
     <script>
       const clientId = '9yr72u8in0lcq9r7kpgfmyef5alg4q';
       const redirectURI = 'http://localhost:8080';
-      const scope = 'channel%3Aread%3Aredemptions';
+      const scope = 'channel%3Aread%3Aredemptions%20channel%3Amanage%3Aredemptions';
       let ws;
       let user_id;
       let connected = false;
+      let allRewards = [
+        'Ball up',
+        'Flap',
+        'Throw',
+        'Dash',
+      ];
 
       function parseFragment(hash) {
         const hashMatch = function(expr) {
@@ -154,11 +163,60 @@ or in the "license" file accompanying this file. This file is distributed on an 
         });
       }
 
+      function loadRewards() {
+          $.ajax({
+            // url: `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${user_id}`,
+            url: `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=123600561`,
+            method: "GET",
+            headers: {
+              "Client-ID": clientId,
+              "Authorization": "Bearer " + sessionStorage.twitchOAuthToken
+            }
+          })
+          .done(function(rewards) {
+            const filteredRewards = rewards.data.filter((reward) => {
+              return allRewards.includes(reward.title);
+            })
+            for (const filteredReward of filteredRewards) {
+              $('.rewards').append(`<p>${filteredReward.title}<input type="checkbox" class="updateReward" id="${filteredReward.id}" ${filteredReward.is_enabled ? 'checked' : ''} /></p>`)
+            }
+            console.log(filteredRewards);
+          });
+      }
+
+      $('body').on({
+        'click': function() {
+          console.log($(this)[0].checked);
+          $.ajax({
+            // url: `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${user_id}`,
+            url: `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=123600561&id=${$(this)[0].id}`,
+            method: "PATCH",
+            headers: {
+              "Client-ID": clientId,
+              "Authorization": "Bearer " + sessionStorage.twitchOAuthToken
+            },
+            data: {
+              is_enabled: $(this)[0].checked
+            }
+          })
+          .done(function(result) {
+            console.log(result)
+          });
+        }
+      }, '.updateReward');
+
+      $(document).ready(function() {
+        $('.updateReward').on('click' ,function () {
+          console.log($(this));
+        })
+      })
+
       $(function() {
+        loadRewards();
         if (document.location.hash.match(/access_token=(\w+)/)) {
           parseFragment(document.location.hash);
         }
-        if (sessionStorage.twitchOAuthToken) {
+        if (sessionStorage.twitchOAuthToken && false) {
           connect();
           $('.socket').show()
           $.ajax({
