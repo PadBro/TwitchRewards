@@ -1,10 +1,4 @@
 <!DOCTYPE html>
-<!--
-Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
-Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance with the License. A copy of the License is located at
-http://aws.amazon.com/apache2.0/
-or in the "license" file accompanying this file. This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
--->
 <html lang="en">
   <head>
     <meta charset="utf-8">
@@ -23,14 +17,11 @@ or in the "license" file accompanying this file. This file is distributed on an 
         </div>
         <div style="display:none" class="socket">
           <textarea class="ws-output" rows="20" style="font-family:Courier;width:100%"></textarea>
-          <form id="topic-form" class="text-right form-inline" >
-            <label id="topic-label" for="topic-text"></label>
-            <input type="text" id="topic-text" placeholder="Topic">
-            <button type="submit" class="btn">Listen</button>
-          </form>
+          <label id="topic-label" for="topic-text"></label>
         </div>
         <div class="rewards">
-          XXXXXXXX
+          <label for="toggle-all">Toggle all</label>
+          <input id="toggle-all" type="checkbox">
         </div>
       </div>
     </div>
@@ -42,12 +33,34 @@ or in the "license" file accompanying this file. This file is distributed on an 
       let ws;
       let user_id;
       let connected = false;
-      let allRewards = [
-        'Ball up',
-        'Flap',
-        'Throw',
-        'Dash',
-      ];
+      const rewardCost = 500;
+      const rewardCooldownInSeconds = 60;
+      let allRewards = {
+        'Ball up': {
+          prompt: 'Let me ball up for 5 seconds',
+        },
+        'Flap': {
+          prompt: 'Let me Flap in game',
+        },
+        'Throw': {
+          prompt: 'Let me throw the ball in game',
+        },
+        'Dash': {
+          prompt: 'Let me dash in game',
+        },
+      };
+
+      function sendApiRequest(endpoint, method, data = {}) {
+        return $.ajax({
+          url: `https://api.twitch.tv/helix/${endpoint}`,
+          method: method,
+          headers: {
+            "Client-ID": clientId,
+            "Authorization": "Bearer " + sessionStorage.twitchOAuthToken
+          },
+          data: data
+        })
+      }
 
       function parseFragment(hash) {
         const hashMatch = function(expr) {
@@ -163,42 +176,67 @@ or in the "license" file accompanying this file. This file is distributed on an 
         });
       }
 
+      function addRewardToHtml(reward) {
+        $('.rewards').append(`
+          <p>
+            <label style="margin-right: 5px;" for="${reward.id}">
+              ${reward.title}
+            </label>
+            <input type="checkbox" class="updateReward" id="${reward.id}" ${reward.is_enabled ? 'checked' : ''} />
+          </p>`
+        );
+      }
+
       function loadRewards() {
-          $.ajax({
-            // url: `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${user_id}`,
-            url: `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=123600561`,
-            method: "GET",
-            headers: {
-              "Client-ID": clientId,
-              "Authorization": "Bearer " + sessionStorage.twitchOAuthToken
-            }
-          })
+        sendApiRequest(
+          `channel_points/custom_rewards?broadcaster_id=${user_id}`,
+          'GET',
+        )
           .done(function(rewards) {
             const filteredRewards = rewards.data.filter((reward) => {
-              return allRewards.includes(reward.title);
+              return Object.keys(allRewards).includes(reward.title);
             })
+
             for (const filteredReward of filteredRewards) {
-              $('.rewards').append(`<p>${filteredReward.title}<input type="checkbox" class="updateReward" id="${filteredReward.id}" ${filteredReward.is_enabled ? 'checked' : ''} /></p>`)
+              addRewardToHtml(filteredReward)
             }
-            console.log(filteredRewards);
+            createRewards(filteredRewards)
           });
+      }
+      function createRewards(filteredRewards) {
+        // if reward is missing create it
+        const missingRewardKeys = Object.keys(allRewards).filter((rewardTitle) => {
+          return !filteredRewards.find((filteredReward) => {
+            return filteredReward.title == rewardTitle
+          })
+        })
+
+        for (const rewardKey of missingRewardKeys) {
+          sendApiRequest(`channel_points/custom_rewards?broadcaster_id=${user_id}`, 'POST', {
+            title: rewardKey,
+            cost: rewardCost,
+            prompt: allRewards[rewardKey].prompt,
+            is_global_cooldown_enabled: true,
+            global_cooldown_seconds: rewardCooldownInSeconds,
+          })
+          .done((result) => {
+            for (const createdReward of result.data) {
+              addRewardToHtml(createdReward)
+            }
+          });
+        }
       }
 
       $('body').on({
         'click': function() {
           console.log($(this)[0].checked);
-          $.ajax({
-            // url: `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${user_id}`,
-            url: `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=123600561&id=${$(this)[0].id}`,
-            method: "PATCH",
-            headers: {
-              "Client-ID": clientId,
-              "Authorization": "Bearer " + sessionStorage.twitchOAuthToken
-            },
-            data: {
+          sendApiRequest(
+            `channel_points/custom_rewards?broadcaster_id=${user_id}&id=${$(this)[0].id}`,
+            'PATCH',
+            {
               is_enabled: $(this)[0].checked
             }
-          })
+          )
           .done(function(result) {
             console.log(result)
           });
@@ -206,44 +244,41 @@ or in the "license" file accompanying this file. This file is distributed on an 
       }, '.updateReward');
 
       $(document).ready(function() {
-        $('.updateReward').on('click' ,function () {
-          console.log($(this));
+        $('#toggle-all').click(() => {
+          for (const checkbox of $('.updateReward')) {
+            console.log(checkbox)
+            if (checkbox.checked != $(this)[0].activeElement.checked) {
+              checkbox.click()
+              console.log('click')
+            }
+          }
         })
-      })
+        
+      });
 
       $(function() {
-        loadRewards();
         if (document.location.hash.match(/access_token=(\w+)/)) {
           parseFragment(document.location.hash);
         }
-        if (sessionStorage.twitchOAuthToken && false) {
+        if (sessionStorage.twitchOAuthToken) {
           connect();
           $('.socket').show()
-          $.ajax({
-            url: "https://api.twitch.tv/helix/users?login=PadBro",
-            method: "GET",
-            headers: {
-              "Client-ID": clientId,
-              "Authorization": "Bearer " + sessionStorage.twitchOAuthToken
-            }
-          })
-          .done(function(users) {
-            user_id = users.data[0].id
-            if (connected) {
-              listen(`channel-points-channel-v1.${user_id}`)
-            }
-            $('#topic-label').text(`Enter a topic to listen to. For example, to listen to whispers enter topic 'whispers.${users.data[0].id}'`);
-          });
+          sendApiRequest('users?login=PadBro', 'GET')
+            .done(function(users) {
+              user_id = users.data[0].id
+              if (connected) {
+                listen(`channel-points-channel-v1.${user_id}`)
+              }
+              $('#topic-label').text(`User id ${users.data[0].id}`);
+
+              // get all rewards
+              loadRewards();
+            });
         } else {
           const url = authUrl()
           $('#auth-link').attr("href", url);
           $('.auth').show()
         }
-      });
-
-      $('#topic-form').submit(function() {
-        listen($('#topic-text').val());
-        event.preventDefault();
       });
     </script>
   </body>
