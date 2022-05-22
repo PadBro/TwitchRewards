@@ -5,3 +5,9 @@ https://www.python.org/downloads/
 ```bash
 pip install -r requirements.txt
 ```
+
+## start 
+```bash
+cd <project>
+py main.py
+```
